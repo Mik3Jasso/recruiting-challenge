@@ -62,4 +62,38 @@ export const ordersDal = {
       .get(merchantId, from, to) as { total: number };
     return row.total;
   },
+
+  /**
+   * Order-count stats for a merchant. Only type='sale' rows are orders;
+   * refund rows are reversals and are excluded from count, customers and average.
+   */
+  summaryByMerchant(merchantId: string): { total_orders: number; unique_customers: number; avg_order_value: number } {
+    return db
+      .prepare(
+        `SELECT COUNT(*) AS total_orders,
+                COUNT(DISTINCT customer_email) AS unique_customers,
+                COALESCE(AVG(total_amount), 0) AS avg_order_value
+         FROM orders WHERE merchant_id = ? AND type = 'sale'`,
+      )
+      .get(merchantId) as { total_orders: number; unique_customers: number; avg_order_value: number };
+  },
+
+  /** Top customers by NET spend (sales minus refunds); order_count counts sales only. */
+  topCustomersByMerchant(
+    merchantId: string,
+    limit: number,
+  ): Array<{ customer_email: string; order_count: number; total_spent: number }> {
+    return db
+      .prepare(
+        `SELECT customer_email,
+                SUM(CASE WHEN type = 'sale' THEN 1 ELSE 0 END) AS order_count,
+                SUM(CASE WHEN type = 'refund' THEN -total_amount ELSE total_amount END) AS total_spent
+         FROM orders
+         WHERE merchant_id = ?
+         GROUP BY customer_email
+         ORDER BY total_spent DESC
+         LIMIT ?`,
+      )
+      .all(merchantId, limit) as Array<{ customer_email: string; order_count: number; total_spent: number }>;
+  },
 };
