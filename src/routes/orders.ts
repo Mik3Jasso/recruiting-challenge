@@ -4,6 +4,22 @@ import { randomUUID } from 'node:crypto';
 
 export const ordersRouter = Router();
 
+/** Amounts are integer cents > 0 (refunds are positive rows with type='refund'). */
+export function validateNewOrder(body: {
+  customer_email?: unknown;
+  total_amount?: unknown;
+  type?: unknown;
+}): boolean {
+  return (
+    typeof body.customer_email === 'string' &&
+    body.customer_email.length > 0 &&
+    typeof body.total_amount === 'number' &&
+    Number.isSafeInteger(body.total_amount) &&
+    body.total_amount > 0 &&
+    (body.type === undefined || body.type === 'sale' || body.type === 'refund')
+  );
+}
+
 ordersRouter.get('/', (req, res) => {
   const orders = ordersDal.listByMerchant(req.merchantId!, {
     from: typeof req.query.from === 'string' ? req.query.from : undefined,
@@ -28,7 +44,7 @@ ordersRouter.post('/', (req, res) => {
     total_amount?: number;
     type?: 'sale' | 'refund';
   };
-  if (!body.customer_email || typeof body.total_amount !== 'number') {
+  if (!validateNewOrder(body ?? {})) {
     res.status(400).json({ error: 'invalid_body' });
     return;
   }
