@@ -9,7 +9,7 @@ export function validateNewOrder(body: {
   customer_email?: unknown;
   total_amount?: unknown;
   type?: unknown;
-}): boolean {
+}): body is { customer_email: string; total_amount: number; type?: 'sale' | 'refund' } {
   return (
     typeof body.customer_email === 'string' &&
     body.customer_email.length > 0 &&
