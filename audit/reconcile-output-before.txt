@@ -1,0 +1,64 @@
+DB=data/audit.db BASE=http://localhost:3901
+Global: orders= 80 by type/status: [{"merchant_id":"m_acme","type":"refund","status":"completed","n":2,"s":18888},{"merchant_id":"m_acme","type":"sale","status":"completed","n":38,"s":361225},{"merchant_id":"m_bistro","type":"refund","status":"completed","n":6,"s":46683},{"merchant_id":"m_bistro","type":"sale","status":"completed","n":34,"s":398243}]
+
+=== m_acme ===
+  rows=40 sales=38 refunds=2 statuses=["completed"] completed=40
+  gross sales=361225 ($3,612.25) refunds=18888 ($188.88) NET=342337 ($3,423.37) naive SUM(all)=380113
+  non-positive amounts=0 unknown types=0 refunds stored as positive=true
+  -- /api/metrics/summary {"merchant_id":"m_acme","total_orders":40,"unique_customers":3,"avg_order_value_cents":9503}
+  DIFF total_orders vs sale count: independent=38 shown=40 (API counts refund rows as orders)
+  OK   unique_customers (sales only): independent=3 shown=3 
+  DIFF avg_order_value_cents vs avg of sales: independent=9506 shown=9503 (avg includes refunds)
+  -- /api/revenue full range {"merchant_id":"m_acme","from":"1970-01-01","to":"9999-12-31","revenue_cents":380113,"revenue":3801.13}
+  DIFF revenue_cents vs NET: independent=342337 shown=380113 (delta 37776; = 2*refunds 37776? true)
+  DIFF revenue_cents vs gross sales: independent=361225 shown=380113 
+  OK   orders list length: independent=40 shown=40 
+  OK   orders list sum(all rows): independent=380113 shown=380113 
+  OK   default list length (limit 100): independent=40 shown=40 
+  -- dashboard emulation (public/app.js)
+  window from=2026-10-04 to=2026-11-03: rows(excl to-day)=15 rows(incl to-day)=15
+  DIFF Revenue(30d) card vs NET incl. today: independent=102485 shown=140261 (card shows $1,402.61; net30 excl today=102485, naive-sum excl today=140261)
+  DIFF Total orders card vs sale count: independent=38 shown=40 
+  DIFF Avg order card: independent="$95.06" shown="$95.03" 
+  recent table shows 10 of 40 rows (client display only; refunds shown as positive amounts: $103.21)
+  DIFF top-customers sum(total_spent) vs NET: independent=342337 shown=380113 
+  DIFF top-customers sum(order_count) vs sales: independent=38 shown=40 
+
+=== m_bistro ===
+  rows=40 sales=34 refunds=6 statuses=["completed"] completed=40
+  gross sales=398243 ($3,982.43) refunds=46683 ($466.83) NET=351560 ($3,515.60) naive SUM(all)=444926
+  non-positive amounts=0 unknown types=0 refunds stored as positive=true
+  -- /api/metrics/summary {"merchant_id":"m_bistro","total_orders":40,"unique_customers":3,"avg_order_value_cents":11123}
+  DIFF total_orders vs sale count: independent=34 shown=40 (API counts refund rows as orders)
+  OK   unique_customers (sales only): independent=3 shown=3 
+  DIFF avg_order_value_cents vs avg of sales: independent=11713 shown=11123 (avg includes refunds)
+  -- /api/revenue full range {"merchant_id":"m_bistro","from":"1970-01-01","to":"9999-12-31","revenue_cents":444926,"revenue":4449.26}
+  DIFF revenue_cents vs NET: independent=351560 shown=444926 (delta 93366; = 2*refunds 93366? true)
+  DIFF revenue_cents vs gross sales: independent=398243 shown=444926 
+  OK   orders list length: independent=40 shown=40 
+  OK   orders list sum(all rows): independent=444926 shown=444926 
+  OK   default list length (limit 100): independent=40 shown=40 
+  -- dashboard emulation (public/app.js)
+  window from=2026-10-04 to=2026-11-03: rows(excl to-day)=15 rows(incl to-day)=16
+  DIFF Revenue(30d) card vs NET incl. today: independent=95732 shown=140657 (card shows $1,406.57; net30 excl today=87041, naive-sum excl today=140657)
+  DIFF Total orders card vs sale count: independent=34 shown=40 
+  DIFF Avg order card: independent="$117.13" shown="$111.23" 
+  recent table shows 10 of 40 rows (client display only; refunds shown as positive amounts: $39.96)
+  DIFF top-customers sum(total_spent) vs NET: independent=351560 shown=444926 
+  DIFF top-customers sum(order_count) vs sales: independent=34 shown=40 
+
+=== cross-tenant probe (GET) ===
+  bistro reads acme order dab82864-e1fd-49d3-8f9a-67e5da30a9ce: HTTP 200
+  unknown merchant reads acme order: HTTP 200
+  GET /api/orders?limit=abc -> HTTP 500 rows={"error":"internal_error"}
+  GET /api/orders?limit=-1 -> HTTP 200 rows=40
+  GET /api/orders?limit=0 -> HTTP 200 rows=0
+  GET /api/orders?limit=1.5 -> HTTP 500 rows={"error":"internal_error"}
+  GET /api/orders?limit=1e9 -> HTTP 200 rows=40
+  GET /api/orders?limit= -> HTTP 200 rows=0
+  date range sanity: from=2026-08-01 to=2026-12-31 rows=40 (DB rows>=from: 40)
+  'from' alone ignored: rows=40 == all 40? true
+  boundary: busiest-latest day 2026-11-02 (1 acme rows): revenue?from=to=2026-11-02 -> 0 (always 0, empty window)
+  boundary: from=2026-11-02 to=2026-11-03 -> 11957; naive sum for that day=11957
+
+TOTAL DISCREPANCIES: 18
