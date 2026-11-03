@@ -39,12 +39,8 @@ ordersRouter.get('/:id', (req, res) => {
 });
 
 ordersRouter.post('/', (req, res) => {
-  const body = req.body as {
-    customer_email?: string;
-    total_amount?: number;
-    type?: 'sale' | 'refund';
-  };
-  if (!validateNewOrder(body ?? {})) {
+  const body: Record<string, unknown> = req.body ?? {};
+  if (!validateNewOrder(body)) {
     res.status(400).json({ error: 'invalid_body' });
     return;
   }
