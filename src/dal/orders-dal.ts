@@ -10,6 +10,18 @@ export interface OrderRow {
   created_at: string;
 }
 
+export interface OrderSummary {
+  total_orders: number;
+  unique_customers: number;
+  avg_order_value_cents: number;
+}
+
+export interface TopCustomerRow {
+  customer_email: string;
+  order_count: number;
+  total_spent: number;
+}
+
 /**
  * Data-access layer for orders. All order queries should go through here.
  *
@@ -61,5 +73,34 @@ export const ordersDal = {
       )
       .get(merchantId, from, to) as { total: number };
     return row.total;
+  },
+  /** Dashboard summary stats for a merchant (rows of every type, as the metrics route always did). */
+  summaryByMerchant(merchantId: string): OrderSummary {
+    const row = db
+      .prepare(
+        `SELECT COUNT(*) AS total_orders,
+                COUNT(DISTINCT customer_email) AS unique_customers,
+                COALESCE(AVG(total_amount), 0) AS avg
+         FROM orders WHERE merchant_id = ?`,
+      )
+      .get(merchantId) as { total_orders: number; unique_customers: number; avg: number };
+    return {
+      total_orders: row.total_orders,
+      unique_customers: row.unique_customers,
+      avg_order_value_cents: Math.round(row.avg),
+    };
+  },
+
+  topCustomersByMerchant(merchantId: string, limit: number): TopCustomerRow[] {
+    return db
+      .prepare(
+        `SELECT customer_email, COUNT(*) AS order_count, SUM(total_amount) AS total_spent
+         FROM orders
+         WHERE merchant_id = ?
+         GROUP BY customer_email
+         ORDER BY total_spent DESC
+         LIMIT ?`,
+      )
+      .all(merchantId, limit) as TopCustomerRow[];
   },
 };
