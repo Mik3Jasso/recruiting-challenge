@@ -112,9 +112,9 @@ Discrepancy vs the task brief: the brief said the metrics endpoints are undocume
 ### 12. Status (verified with `git worktree list` / `git branch`: only problem1 branch and worktree exist so far)
 | # | Branch | Status | Tests | Code-review result | User commit |
 |---|---|---|---|---|---|
-| 1 | `bugfix/problem1_revenue-adds-refunds` | fix done, awaiting USER review and commit (nothing committed/staged) | 8/8 pass, tsc clean (lead re-ran) | approve with nits (code-review, medium) | - |
-| 2 | `bugfix/problem2_post-orders-validation` | pending | - | - | - |
-| 3 | `bugfix/problem3_metrics-bypasses-dal` | pending | - | - | - |
+| 1 | `bugfix/problem1_revenue-adds-refunds` | committed by user (`aef322d`) | 8/8 pass, tsc clean (lead re-ran) | approve with nits (code-review, medium) | committed by user: `aef322d` |
+| 2 | `bugfix/problem2_post-orders-validation` | committed by user (`33343f4`) | 12/12 before rebase; 18/18 after rebase onto main, tsc clean | approve with nits (code-review, medium); nothing blocking | committed by user: `33343f4` |
+| 3 | `bugfix/problem3_metrics-bypasses-dal` | committed by user (`d378e8a`) | 15/15 pass, tsc clean (lead re-ran) | approve with nits (code-review, medium); no blockers | committed by user: `d378e8a` |
 
 ### 13. Problem 1 - revenue adds refunds (`bugfix/problem1_revenue-adds-refunds`)
 Worktree `.worktrees/problem1`. Verified: `git status --short` shows `M src/dal/orders-dal.ts`, `?? test/revenue.test.ts`, `?? .impeccable/`; nothing committed.
@@ -136,6 +136,82 @@ Non-blocking review notes:
 6. Nit: unquoted test glob in `package.json`.
 
 Next: user reviews code and review results, then commits or requests changes. Problems 2 and 3 pending.
+
+#### Problem 1 outcome (2026-11-04)
+The user committed it as `aef322d` on `bugfix/problem1_revenue-adds-refunds` with the message "Fix: summed total_amount for every row, but refounds subtract, test added" (message as written by the user). Verified with `git show --stat`: `src/dal/orders-dal.ts` (+3/-2) and `test/revenue.test.ts` (+62 new). `.impeccable/` left untracked. Note: `main` is now at `1be8a54` ("Docs finding, step 0", committed by the user; `Doc History.md` and `FINDINGS.md` are tracked there, working tree clean); the problem 1 branch was cut from `cbf80ec`.
+
+### 14. Problem 2 - POST /api/orders accepts any number and any type (`bugfix/problem2_post-orders-validation`)
+Worktree `.worktrees/problem2`, cut from `main` at `1be8a54`. Verified: `git status --short` shows `M src/routes/orders.ts`, `?? src/validation/`, `?? test/order-validation.test.ts`; nothing committed. `git diff --stat`: `src/routes/orders.ts` +5/-10.
+| Step | Who | Outcome |
+|---|---|---|
+| Pure validator `src/validation/orders.ts`: `validateNewOrder(body: unknown)` returns `{ok,value}` or `{ok,detail}`; route made thin | dev agent (no commits allowed) | See rules below |
+| Tests `test/order-validation.test.ts`: 10 tests (8 validator + 2 HTTP on a tiny express app with the real `ordersRouter`, in-memory DB, stub auth) | dev agent | Red-then-green: no validator -> `ERR_MODULE_NOT_FOUND`; validator + original route -> 12 tests, 11 pass, 1 fail (invalid-bodies HTTP test); new route -> 12/12 |
+| Re-run | lead | `npm test` 12/12, tsc clean; nothing committed, staged or stashed |
+
+Rules enforced: body is a non-array object; `customer_email` non-empty after trim (stored trimmed, no format check); `total_amount` safe integer > 0 (refunds also positive); `type` exactly `'sale'` or `'refund'`, default `'sale'`; only those 3 fields are read (`id`, `merchant_id`, `status` are server-set); failure returns 400 `{error:'invalid_body', detail}`.
+
+Caveats: email not format-checked; no idempotency/duplicate protection; the old route's valid-body HTTP case already passed.
+
+Recommended `docs/api.md` wording for `POST /api/orders` (recorded verbatim, **not applied**):
+> Body: `{ customer_email, total_amount, type? }`. `customer_email`: non-empty string. `total_amount`: positive integer number of cents (refunds are also positive). `type`: `'sale'` (default) or `'refund'`. Other fields are ignored. `id`, `merchant_id` and `status` are set by the server. Returns 201 `{ order }`, or 400 `{ error: 'invalid_body', detail }`.
+
+Independent read-only review (`code-review` skill, medium): **APPROVE WITH NITS**, nothing blocking. Reviewer ran `npm test` 12/12, tsc clean.
+1. Non-blocking, cross-branch: validator comment at `src/validation/orders.ts:13-14` says the `type` column makes refunds reduce revenue; true only once problem 1's sign-aware SUM (`aef322d`) is merged. Merge problem 1 first or reword the comment.
+2. Non-blocking: upper bound is `MAX_SAFE_INTEGER`; a SUM of ~1,000 such rows could overflow SQLite 2^63 (500 on revenue), and totals above 2^53 lose precision in JS. Consider a cap of ~1e12 cents.
+3. Non-blocking, pre-existing: malformed JSON makes `express.json` throw and the global handler returns 500 `internal_error` instead of 400 (`src/server.ts:26-29`).
+4. Nit: unused `raw` param in the `post()` helper at `test/order-validation.test.ts:89`, so there is no malformed-JSON test.
+5. Nit: `docs/api.md:17` needs the new POST wording above.
+6. Nit: no email length cap or format check.
+Verified fine by reviewer: spread cannot override `id`/`merchant_id`/`status`; union narrows; `__proto__` key harmless; `type: null` rejected; HTTP tests use `:memory:`, port 0, `server.close()`; tests would fail on the old route.
+
+Status: tests pass; code-review done (approve with nits); awaiting user review and commit. Problem 3 pending.
+
+#### Updates (2026-11-04)
+- **Problem 1 merged:** the user merged it into `main` as `d8581a3` (from `bugfix/problem1_revenue-adds-refunds`, commit `aef322d`).
+- **Problem 2 rebased:** at the user's request the branch was rebased onto `main` (`git rebase --autostash main`). It had no commits of its own, only uncommitted work; autostash restored it; `git stash list` is empty. After the rebase `npm test` 18/18, tsc clean (per lead). This resolves review finding 1 (the validator comment about refunds is now true because problem 1 is in the base).
+- **Problem 2 committed:** the user committed it as `33343f4` on `bugfix/problem2_post-orders-validation`, message "Fix: only checked typeof total_amount === 'number' and positive, test added" (as written by the user). Verified with `git show --stat`: `src/routes/orders.ts`, `src/validation/orders.ts`, `test/order-validation.test.ts`; 171 insertions, 10 deletions.
+- **Open follow-ups (review items 2-6, NOT applied):** amount cap (~1e12 cents), malformed JSON returns 500 instead of 400, unused `raw` param in the test `post()` helper, `docs/api.md` POST wording, email length/format check.
+
+### 15. Problem 3 - metrics bypasses the DAL (`bugfix/problem3_metrics-bypasses-dal`)
+Worktree `.worktrees/problem3`, cut from `main` at `d8581a3` (verified: `git status --short` clean, no changes yet).
+- Assignment to dev agent (no commits allowed): pure refactor. Move the metrics SQL into new `ordersDal` methods with identical outputs; characterization tests first.
+- Out of scope, left alone: refund counting in metrics (F2), `limit` parsing, tenancy, dates.
+- Dev agent fix (pure refactor): `src/routes/metrics.ts` no longer opens its own readonly `Database` connection (+3/-35); `src/dal/orders-dal.ts` gains `summaryByMerchant()` and `topCustomersByMerchant()` with exported types `OrderSummary`/`TopCustomerRow` (+41); the 3 summary queries merged into one; `Math.round` moved into the DAL; JSON shape, key order and numbers unchanged.
+- Tests: new `test/metrics.test.ts`, 7 tests (5 HTTP characterization tests on a tiny express app with the real `metricsRouter`, in-memory DB, stub auth, port 0; 2 DAL tests). Red-then-green: before the refactor the file failed at import with "TypeError: In-memory/temporary databases cannot be readonly" (9 tests, 8 pass, 1 fail); after: 15/15. The old-code failure claim rests on reading the code plus the dev agent's run.
+- Lead re-run: `npm test` 15/15, tsc clean; nothing committed, staged or stashed.
+- Deliberately unchanged (still open): refund rows counted as orders/averaged and added in top-customers (F2), unvalidated `limit` (F9), tenancy (F4).
+- Independent read-only review (`code-review` skill, medium): **APPROVE WITH NITS**, no blockers; 15/15, tsc clean. Equivalence checked against `git show main:src/routes/metrics.ts`; `new Database` now only in `src/db.ts:11`; no new write risk.
+  1. Non-blocking: `docs/architecture.md:14` "Not all routes follow this yet - see `metrics.ts`" is stale. Recommended wording (not applied): "All order queries, including the metrics routes, go through `ordersDal`."
+  2. Non-blocking: missing blank line before the new method at `src/dal/orders-dal.ts:77`.
+  3. Non-blocking: `test/metrics.test.ts:55-63` pins refund behaviour; add "update when F2 lands" to the comment.
+  4-6. Nits: shared in-memory db per file is fine; `get(): Promise<any>` and untested `limit=abc`/negative/ties (known, unfixed); the DAL comment "rows of every type" honestly documents the quirk.
+- Status: tests pass; code-review done (approve with nits); awaiting user review and commit.
+
+#### Problem 3 outcome
+The user committed it as `d378e8a` on `bugfix/problem3_metrics-bypasses-dal`, message "Fix: metrics route bypassed the DAL with its own DB connection; route through ordersDal, tests added" (as written by the user). Verified with `git show --stat`: `src/dal/orders-dal.ts`, `src/routes/metrics.ts`, `test/metrics.test.ts`; 161 insertions, 35 deletions. Review nits NOT applied (kept in follow-ups): stale note at `docs/architecture.md:14`, blank line at `orders-dal.ts:77`, "update when F2 lands" comment in `test/metrics.test.ts`.
+
+### Phase 2 summary
+| # | Branch | Commit | State in git (verified) |
+|---|---|---|---|
+| 1 | `bugfix/problem1_revenue-adds-refunds` | `aef322d` | Merged into `main` via `d8581a3` |
+| 2 | `bugfix/problem2_post-orders-validation` | `33343f4` | Branch only; not merged (not in `git branch --merged main`) |
+| 3 | `bugfix/problem3_metrics-bypasses-dal` | `d378e8a` | Branch only; not merged |
+
+- Worktrees `.worktrees/problem1`, `problem2`, `problem3` and branch `audit/orders-sandbox` still exist.
+- `.impeccable/` (tool cache) was never committed; it is untracked in the problem 1 worktree.
+- `main` is at `d8581a3`.
+
+### Remaining follow-ups after Phase 2
+- F2: metrics still count refunds as orders/averages and add them in top-customers.
+- F4: `getById` has no merchant filter (tenancy).
+- F5: auth trusts any `X-Merchant-Id` header.
+- F7: date range (`to` exclusive, today excluded, timestamp format mismatch).
+- F8: `from`/`to` alone silently ignored.
+- F9: `limit` parsing (500s, negative returns all rows).
+- F10: dashboard shows refunds as positive; `customer_email` unescaped.
+- Problem 2 review items 2-6: amount cap, malformed JSON 500, unused `raw` test param, `docs/api.md` POST wording, email length/format.
+- Problem 3 review nits: stale `docs/architecture.md:14` note, blank line at `orders-dal.ts:77`, "update when F2 lands" test comment.
+- Docs: `docs/api.md` (POST wording, metrics fields) and `docs/architecture.md` (line 14 wording, `lib/`, `dashboard.tsx`) updates.
 
 ## How to update this document
 Append a new `## YYYY-MM-DD` heading (use the actual date) below the last entry, then one entry per step containing:
