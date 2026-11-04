@@ -22,6 +22,62 @@ export interface TopCustomerRow {
   total_spent: number;
 }
 
+/** Fixed page size for order listings; not client-configurable. */
+export const PAGE_SIZE = 30;
+
+export interface OrderFilters {
+  /** created_at >= from (inclusive). Applied independently of `to`. */
+  from?: string;
+  /** created_at < to (exclusive). */
+  to?: string;
+  /** Case-insensitive "contains" match on customer_email; LIKE wildcards are literal. */
+  email?: string;
+  type?: 'sale' | 'refund';
+  /** Exact match on total_amount, in integer cents. */
+  amountCents?: number;
+}
+
+export interface OrderPage {
+  orders: OrderRow[];
+  /** Number of rows matching the filters across all pages. */
+  total: number;
+}
+
+/** Escapes LIKE wildcards so user input matches literally (paired with ESCAPE '\'). */
+function escapeLike(input: string): string {
+  return input.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+/**
+ * Builds the shared WHERE clause. SQL text is assembled only from fixed fragments;
+ * every user-supplied value goes through a bound parameter. Tenancy is always applied.
+ */
+function buildWhere(merchantId: string, f: OrderFilters): { sql: string; params: (string | number)[] } {
+  const clauses = ['merchant_id = ?'];
+  const params: (string | number)[] = [merchantId];
+  if (f.from !== undefined) {
+    clauses.push('created_at >= ?');
+    params.push(f.from);
+  }
+  if (f.to !== undefined) {
+    clauses.push('created_at < ?');
+    params.push(f.to);
+  }
+  if (f.email !== undefined) {
+    clauses.push("customer_email LIKE ? ESCAPE '\\'");
+    params.push(`%${escapeLike(f.email)}%`);
+  }
+  if (f.type !== undefined) {
+    clauses.push('type = ?');
+    params.push(f.type);
+  }
+  if (f.amountCents !== undefined) {
+    clauses.push('total_amount = ?');
+    params.push(f.amountCents);
+  }
+  return { sql: clauses.join(' AND '), params };
+}
+
 /**
  * Data-access layer for orders. All order queries should go through here.
  *
@@ -45,6 +101,27 @@ export const ordersDal = {
     return db
       .prepare(`SELECT * FROM orders WHERE merchant_id = ? ORDER BY created_at DESC LIMIT ?`)
       .all(merchantId, limit) as OrderRow[];
+  },
+
+  /**
+   * One page of a merchant's orders (newest first, id as tiebreaker) plus the real
+   * total of matching rows. Count and page are read in one transaction.
+   */
+  search(merchantId: string, filters: OrderFilters, page: number, pageSize: number = PAGE_SIZE): OrderPage {
+    const where = buildWhere(merchantId, filters);
+    return db.transaction((): OrderPage => {
+      const { total } = db
+        .prepare(`SELECT COUNT(*) AS total FROM orders WHERE ${where.sql}`)
+        .get(...where.params) as { total: number };
+      const orders = db
+        .prepare(
+          `SELECT * FROM orders WHERE ${where.sql}
+           ORDER BY created_at DESC, id DESC
+           LIMIT ? OFFSET ?`,
+        )
+        .all(...where.params, pageSize, (page - 1) * pageSize) as OrderRow[];
+      return { orders, total };
+    })();
   },
 
   getById(id: string): OrderRow | undefined {

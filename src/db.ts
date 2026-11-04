@@ -32,5 +32,7 @@ export function initSchema(): void {
 
     CREATE INDEX IF NOT EXISTS idx_orders_merchant ON orders(merchant_id);
     CREATE INDEX IF NOT EXISTS idx_orders_created ON orders(created_at);
+    -- Serves the per-merchant, newest-first listing/search (filter + sort + id tiebreaker).
+    CREATE INDEX IF NOT EXISTS idx_orders_merchant_created ON orders(merchant_id, created_at, id);
   `);
 }

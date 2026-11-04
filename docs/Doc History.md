@@ -213,6 +213,83 @@ The user committed it as `d378e8a` on `bugfix/problem3_metrics-bypasses-dal`, me
 - Problem 3 review nits: stale `docs/architecture.md:14` note, blank line at `orders-dal.ts:77`, "update when F2 lands" test comment.
 - Docs: `docs/api.md` (POST wording, metrics fields) and `docs/architecture.md` (line 14 wording, `lib/`, `dashboard.tsx`) updates.
 
+## 2026-11-04 - Phase 3: feature "search orders" (`feature/search-orders`)
+
+Status at the time of writing: **Awaiting user review; nothing committed.** Verified by the doc agent: branch `feature/search-orders`; `git status --short` shows `M public/app.js`, `M public/index.html`, `M src/dal/orders-dal.ts`, `M src/db.ts`, `M src/routes/orders.ts`, `M src/validation/orders.ts`, and untracked `data/`, `test/orders-search.test.ts`, `test/search-validation.test.ts`. Doc agent re-ran `npm test`: 69/69 pass; `npx tsc --noEmit`: exit 0.
+
+### 16. Feature request and user decisions (Q&A)
+Request: add search/filter to the orders list in the dashboard (date, customer email, type, amount) with pagination of 30 per page. Decisions recorded from the user's answers (as relayed by the lead):
+| Question | Decision |
+|---|---|
+| Endpoint | `GET /api/orders/search` |
+| Amount | exact match, entered in **dollars** |
+| Date | a single day, **UTC**; a future date is accepted and returns empty results |
+| Email | "contains", case-insensitive |
+| Display note | the shown `total` must be the **real count** (e.g. 31 matches => 30 on page 1 + 1 on page 2) |
+| Paging | also on `GET /api/orders` |
+| Response | includes `page` and `total` |
+| Sample data | a JSON file used **only by tests**; no seed script |
+| Workflow | same as before: branch `feature/search-orders`, coding agent does not commit, tests must pass, a separate code-review agent reviews, the user commits |
+
+### 17. Implementation (coding agent; no commits)
+Files (`git diff --stat`, tracked files only): `public/app.js` (+219/-), `public/index.html` (+54), `src/dal/orders-dal.ts` (+77), `src/db.ts` (+2), `src/routes/orders.ts` (+35/-), `src/validation/orders.ts` (+111); total 6 files, 470 insertions, 28 deletions. New untracked: `test/orders-search.test.ts`, `test/search-validation.test.ts`, `data/sample-orders.json`.
+- DAL: `PAGE_SIZE = 30`, `OrderFilters`, shared `buildWhere`, `ordersDal.search()` (COUNT + page in one transaction, `ORDER BY created_at DESC, id DESC`).
+- Validation: `validateSearchQuery`, `validatePageQuery`, `parseDollarsToCents`, `MAX_PAGE`.
+- Routes: `GET /api/orders/search` (declared before `/:id`); `GET /api/orders` now paged. Response `{orders, page, page_size, total, total_pages}`.
+- DB: new index `idx_orders_merchant_created ON orders(merchant_id, created_at, id)`.
+- Frontend: filter form, Search/Clear, table, status line, empty/error states, pager.
+- Sample data: `data/sample-orders.json`, 2000 orders (verified by doc agent: acme 1206 = 1053 sale + 153 refund; bistro 794 = 696 sale + 98 refund; `created_at` from 2025-11-04T02:55:00.973Z to 2026-11-03T22:30:24.101Z, ISO format). It is read by `test/orders-search.test.ts` only; `src/scripts/seed.ts` (pre-existing, run at server start) does not load it.
+
+Decisions the coding agent flagged (not asked of the user):
+1. Mixed `created_at` formats (seed/sample ISO `T...Z` vs SQLite `CURRENT_TIMESTAMP` `YYYY-MM-DD HH:MM:SS`): the day bounds use the space form (`D 00:00:00`), which works for both at day granularity.
+2. `total_pages` is 0 when there are no results.
+3. `MAX_PAGE = 1,000,000` was chosen by the agent (no user input).
+4. `ordersDal.listByMerchant` kept but now unused.
+5. Case-insensitivity is ASCII only (SQLite `LIKE`).
+6. `amount=12.500` (3 decimals) is rejected.
+7. The generator script for the sample JSON was not kept, so the file cannot be regenerated.
+
+### 18. TDD evidence
+- Red: the new test files first failed on the missing exports `PAGE_SIZE` and `parseDollarsToCents` (2 test files failing). (As reported by the coding agent; the red run was not repeated by the doc agent.)
+- Green: after the implementation `npm test` 69/69, `tsc` clean. Verified independently by the orchestrator; re-verified by the doc agent (69/69, `tsc --noEmit` exit 0).
+- Coverage highlights (from test titles): 31 matches => 30 + 1 with `total` 31 and `total_pages` 2; exactly 30 is one page; page beyond last is empty with real total; LIKE wildcards literal; SQL in email treated as data; tenancy; date on both timestamp formats; sample data: walking all pages yields every row once, filters vs an in-memory oracle, a merchant+day with 31+ orders.
+
+### 19. Manual UI check (lead)
+Server on port 3055 with a temporary DB, driven in the in-app browser. **No screenshots were taken and no screen reader was used**, so visual polish and assistive-technology behaviour are unverified. (Details as reported by the lead; not re-run by the doc agent.)
+
+### 20. Breaking changes for `GET /api/orders` consumers
+- Response gains `page`, `page_size`, `total`, `total_pages`.
+- Paginated: 30 rows per page (previously default 100).
+- `limit` is now ignored (previously honoured; earlier behaviour for bad values is in F9).
+- A bad `page` returns 400 `invalid_param`.
+- Unchanged: `from`/`to` apply only when **both** are given (verified in `src/routes/orders.ts`; one alone is ignored).
+- The dashboard "Recent orders" list (previously `limit=10`) became a searchable, paged "Orders" table.
+
+### 21. Independent code review (`code-review`, separate agent, read-only)
+Verdict: **APPROVE WITH NITS; nothing blocking.** All findings below are **NOT applied and await the user's decision.** (Severity and fixes as given by the reviewer; the doc agent confirmed items 1, 4, 5, 6 and 7 by reading the code, the rest are reviewer claims.)
+| # | Severity | Finding | Suggested fix |
+|---|---|---|---|
+| 1 | MEDIUM | `refreshSummary` in `public/app.js` has no stale-response guard and swallows errors (`.catch(() => {})`); a merchant switch can show the previous merchant's summary cards, and failures are silent | Add a sequence guard like `loadSeq`; show an error state |
+| 2 | LOW-MED | Client `AMOUNT_RE` (`/^\d+(\.\d{1,2})?$/`) allows more than 12 integer digits while the server caps at 12; the resulting 400 wipes the table (`showLoadError` clears rows) | Cap digits client-side (`\d{1,12}`); keep the old rows on a 400 |
+| 3 | LOW | Ordering across mixed `created_at` formats is not handled (text comparison; `T` sorts after space within the same day) | Normalise `created_at` on insert, or order by `datetime(created_at)` (index trade-off) |
+| 4 | LOW | `idx_orders_merchant` is redundant with the new `idx_orders_merchant_created` | Drop it in a later change |
+| 5 | LOW | `limit` is silently ignored; the DAL comment says `from` is applied independently while the route requires both | Document (done in `api.md`) or reject `limit`; align the comment |
+| 6 | LOW | `MAX_PAGE` 1,000,000 x 30 allows a large `OFFSET` (slow deep scans) | Lower the cap or use keyset paging |
+| 7 | NIT | Date input `max` is set once at load and goes stale after midnight UTC; `aria-describedby` is only on the amount input | Refresh `max` on submit; add `aria-describedby` to the others |
+| 8 | NIT | No tests for repeated params over HTTP, or for the fixed page size vs `?limit`/`?page_size` on `/search` | Add the tests |
+
+### 22. Documentation (doc agent)
+- `docs/api.md`: documented `GET /api/orders/search`; updated `GET /api/orders` (paginated, `page`, `limit` ignored, `from`/`to` need both, breaking-change note). Also applied two trivial stale items: the `POST /api/orders` wording recorded in step 14, and "net of refunds, `from`/`to` required, `to` exclusive" for `/api/revenue`. Metrics endpoints still say "TODO: document fields".
+- `docs/architecture.md`: added the search/pagination design and frontend sections; added `validation/orders.ts` to Modules; replaced the stale line "Not all routes follow this yet - see `metrics.ts`" with "All order queries, including the metrics routes, go through `ordersDal`" after verifying `src/routes/metrics.ts` imports only `ordersDal` (the seed script is the one place that writes with `db` directly). `lib/` and `dashboard.tsx` stale items left as they were (out of scope).
+
+### Open follow-ups after Phase 3
+- Review findings 1-8 above (awaiting the user's decision).
+- Sample JSON cannot be regenerated (generator not kept).
+- Unverified: visual/accessibility behaviour of the UI (no screenshots, no screen reader); the red test run (reported, not re-run).
+- Still open from earlier phases: F2, F4, F5, F7, F8, F9, F10 and the Phase 2 review items.
+- Correction: all three `bugfix/problem*` branches (`aef322d`, `33343f4`, `d378e8a`) were later merged into `main` with `--no-ff`, keeping their commits, and the branches and worktrees were removed. `main` was at `7970a94` when Phase 3 started. The "not merged" status in the Phase 2 summary table is historical.
+- Status: **Awaiting user review; nothing committed.**
+
 ## How to update this document
 Append a new `## YYYY-MM-DD` heading (use the actual date) below the last entry, then one entry per step containing:
 - **What** - the action in one line.

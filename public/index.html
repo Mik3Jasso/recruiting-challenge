@@ -17,6 +17,18 @@
       th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid #ccc4; }
       th { font-weight: 600; opacity: 0.8; }
       .muted { opacity: 0.6; }
+      .filters { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-end; margin: 0.5rem 0; }
+      .filters .field { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; }
+      .filters input, .filters select, button { font: inherit; padding: 0.35rem 0.5rem; }
+      .field-error { color: #c0392b; font-size: 0.85rem; min-height: 1.2em; margin: 0.25rem 0 0; }
+      .empty-state, .load-error { margin: 1rem 0; }
+      .load-error { color: #c0392b; }
+      .table-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 1rem; margin-top: 0.75rem; }
+      .pager { display: flex; gap: 0.25rem; align-items: center; }
+      .pager button[aria-current="page"] { font-weight: 700; background: Highlight; color: HighlightText; }
+      .pager .ellipsis { padding: 0 0.25rem; opacity: 0.6; }
+      td.num, th.num { text-align: right; }
+      [hidden] { display: none !important; }
     </style>
   </head>
   <body>
@@ -42,14 +54,48 @@
       </div>
     </section>
 
-    <section>
-      <h2>Recent orders</h2>
-      <table>
+    <section aria-labelledby="orders-heading">
+      <h2 id="orders-heading">Orders</h2>
+      <form id="orders-filters" class="filters" novalidate>
+        <div class="field">
+          <label for="filter-date">Date (UTC)</label>
+          <input type="date" id="filter-date" name="date" />
+        </div>
+        <div class="field">
+          <label for="filter-email">Customer email</label>
+          <input type="text" id="filter-email" name="email" autocomplete="off" placeholder="contains…" />
+        </div>
+        <div class="field">
+          <label for="filter-type">Type</label>
+          <select id="filter-type" name="type">
+            <option value="">All</option>
+            <option value="sale">Sale</option>
+            <option value="refund">Refund</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="filter-amount">Amount ($)</label>
+          <input type="text" id="filter-amount" name="amount" inputmode="decimal" autocomplete="off"
+                 placeholder="12.50" aria-describedby="filter-error" />
+        </div>
+        <button type="submit" id="search-btn">Search</button>
+        <button type="button" id="clear-btn">Clear</button>
+      </form>
+      <p id="filter-error" class="field-error" role="alert"></p>
+
+      <table aria-describedby="orders-status" id="orders-table">
         <thead>
-          <tr><th>Date</th><th>Customer</th><th>Type</th><th>Amount</th></tr>
+          <tr><th scope="col">Date (UTC)</th><th scope="col">Customer</th><th scope="col">Type</th><th scope="col" class="num">Amount</th></tr>
         </thead>
         <tbody id="orders-tbody"></tbody>
       </table>
+      <p id="orders-empty" class="empty-state muted" hidden>No orders match your filters</p>
+      <p id="orders-error" class="load-error" role="alert" hidden></p>
+
+      <div class="table-footer">
+        <span id="orders-status" aria-live="polite" aria-atomic="true">Loading…</span>
+        <nav class="pager" id="pager" aria-label="Orders pagination"></nav>
+      </div>
     </section>
 
     <script src="/app.js"></script>
