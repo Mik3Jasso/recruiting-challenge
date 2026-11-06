@@ -298,3 +298,33 @@ Append a new `## YYYY-MM-DD` heading (use the actual date) below the last entry,
 - **Outcome** - result, including test/tsc status and anything unverified.
 
 Rules: never edit past entries (add a correction entry instead); state only what was verified; link to `audit/FINDINGS.md` for finding details rather than copying them.
+
+## 2026-11-06 - Phase 4 - documentation refresh
+
+Branch `main` (clean at start; search/pagination merged as `43be26f`). Status: **Awaiting user review; nothing committed.** Only `docs/api.md`, `docs/architecture.md` and this file were edited.
+
+### 23. Request and decisions (user)
+- Request: make `docs/api.md` and `docs/architecture.md` accurately describe the system as it is today, verified against the code.
+- Questions asked and the user's answers (final):
+  1. Document actual behaviour or the intended behaviour from FINDINGS? **Actual behaviour**, plus a clearly labelled "Known limitations" section in each doc pointing to FINDINGS IDs (F2, F4, F5, F7/F8, F9, mixed `created_at` formats, unused `listByMerchant`, ignored `limit`, redundant index, and the unfixed `public/app.js` review nits), verified first and stated neutrally.
+  2. `architecture.md`: remove the "DRAFT" banner and stale open items (`dashboard.tsx`, `analytics-events`); keep "Audit logging - TBD" and add the real open work; add request flow, dashboard, run/seed/test and data-model sections.
+  3. `api.md`: remove the "Quick-and-dirty" banner; add conventions; document every endpoint (including health, `/:id`, POST, revenue and both metrics endpoints) with real example responses; add Known limitations.
+  4. This history: append a new section with request, Q&A, changes, verification and unverified items.
+
+### 24. Changes (doc agent)
+- `docs/api.md`: rewritten. Banner removed. Added Conventions and an Errors table (401 `missing_merchant_id`, 400 `invalid_param` / `invalid_body` / `missing_date_range`, 404 `not_found`, 500 `internal_error`). Added the previously missing or TODO sections: `GET /api/health`, `GET /api/orders/:id` (real tenancy behaviour), `GET /api/revenue` fields, `GET /api/metrics/summary` and `GET /api/metrics/top-customers` (each field defined as the SQL computes it, `limit` behaviour table). Real example responses and curl lines throughout. Added Known limitations L1-L11.
+- `docs/architecture.md`: rewritten. "DRAFT" banner, `lib/` bullet and the stale open items removed. Added Request flow diagram, Modules table, full Data model (columns, three indexes, cents, refunds stored positive, `status` values, both `created_at` formats, pragmas), Dashboard section (cards to endpoint/field, merchant switcher, orders panel, 30-day window, UTC), Run/seed/test section (scripts, `PORT`, `DB_PATH`, WAL files, seeding, reseed, per-file test table), Known limitations (11 items) and Open items. Search/pagination text kept after re-verification, de-duplicated against api.md.
+- Old claims the code contradicted: api.md "All endpoints require the `X-Merchant-Id` header" (`/api/health` does not); architecture.md mentioned a `lib/` directory (none exists in `src/`); metrics were undocumented, and `/api/orders/:id` had no description of its (absent) tenancy check. Related, FINDINGS marks F2 as FIXED (sandbox branch) while `main` still counts all rows (`test/metrics.test.ts` pins this); the docs follow `main`.
+
+### 25. Verification (doc agent)
+- Read in full: `src/server.ts`, `src/auth.ts`, `src/db.ts`, `src/dal/orders-dal.ts`, `src/routes/*.ts`, `src/validation/orders.ts`, `src/scripts/seed.ts`, `public/index.html`, `public/app.js`, `package.json`, `tsconfig.json`, `test/*.test.ts` (structure and test names), `data/sample-orders.json` (shape and counts via a node one-liner), `docs/FINDINGS.md`, this file.
+- Ran the server on a throwaway DB under the session scratchpad (`DB_PATH=<scratchpad>/live/t.db PORT=3077 npx tsx src/server.ts`); never touched `data/dashboard.db`. Probed with curl and recorded: health 200; missing and empty header 401; `page=0` 400; `limit` ignored on `/api/orders`; `/api/orders/:id` for an `m_acme` order returned 200 with `X-Merchant-Id: m_bistro` and with an unknown id `nobody` (F4 confirmed); unknown id 404; POST valid 201 (`created_at` in space format), negative amount 400, malformed JSON 500, unknown merchant 500; `/api/revenue` normal and missing `to` (400); `from` alone on `/api/orders` ignored (all rows) and `to` exclusive (a row created on the `to` day excluded); summary values hand-checked against `sqlite3` (41 rows, 4 customers, average 10235.3 rounds to 10235); top-customers `limit` = `2`, `0`, empty, `-1`, `1e9`, `abc`, `1.5`, `Infinity`, repeated, ` 3`; unknown merchant gets zeros/empty lists; unknown `/api/nope` returns HTML 404; `/` served as HTML. `PRAGMA index_list(orders)` showed the three indexes plus the primary key.
+- Server stopped (`pkill`), temp directory deleted.
+- `npm test`: 69 tests, 69 pass, 0 fail (10 + 7 + 2 + 29 + 15 + 6 across 6 files). `npx tsc --noEmit`: exit 0.
+- `git status --short` at the end shows only `docs/api.md`, `docs/architecture.md`, `docs/Doc History.md`.
+
+### 26. Unverified (doc agent)
+- Browser behaviour was verified by reading `public/app.js` only (no screenshots, no screen-reader or manual UI run). The stale-response race in `refreshSummary()` is inferred from the code, not reproduced.
+- Large-table performance of deep `OFFSET` pages (`MAX_PAGE`) is not measured.
+- FINDINGS F10-F12 (innerHTML, test tooling) were not re-checked beyond what is stated in the docs; F10's `innerHTML` claim no longer matches `app.js` (rows use `textContent`).
+- Earlier entries in this file are left as written, including statements that are now stale (for example step 22 "Metrics endpoints still say TODO").
